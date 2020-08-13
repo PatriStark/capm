@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Capital Asset Pricing Model"
 output: html_notebook
 ---
 
