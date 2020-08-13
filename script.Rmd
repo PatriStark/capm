@@ -1,0 +1,116 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+loads stocks data
+```{r}
+stocks_data <- read.delim2("stocks_data.txt", header=TRUE)
+rownames(stocks_data) <- lapply(rownames(stocks_data), as.Date, format="%Y.%m.%d")
+#View(stocks_data)
+```
+calculate daily rates for each equity
+```{r}
+rates_data <- stocks_data
+for (equity in colnames(rates_data)) {
+  
+  prev_val <- stocks_data[[equity]][1]
+  
+  for (date in rownames(stocks_data)) {
+    rates_data[date, equity] <- (stocks_data[date, equity] / prev_val - 1.)
+    prev_val <- stocks_data[date, equity]
+  }
+  
+}
+stocks_data <- NULL
+View(rates_data)
+```
+loads historical risk-free rates
+```{r}
+risk_free_data <- read.csv("10-year-treasury-rate-yield-chart.csv", header=TRUE) # file is missing for now
+rownames(risk_free_data) <- lapply(rownames(risk_free_data), as.Date)
+for (date in rownames(risk_free_data)) {
+  risk_free_data[date, "values"] <- (1. + risk_free_data[date, "values"] / 100.) ^ (1./250.) - 1.
+}
+View(risk_free_data)
+```
+compares dates of two datasets
+```{r}
+rfd_invalid_dates <- c()
+rtsd_invalid_dates <- c()
+for (date in (16000:17900)) {
+  if (date %in% rownames(rates_data) && !(date %in% rownames(risk_free_data))) {
+      rtsd_invalid_dates <- c(rtsd_invalid_dates, date)
+#      print(cat("deleted from std: ", date))
+    } else if (!(date %in% rownames(rates_data)) && date %in% rownames(risk_free_data)) {
+      rfd_invalid_dates <- c(rfd_invalid_dates, date)
+#      print(cat("deleted from rfd: ", date))
+    }
+}
+
+risk_free_data <- subset(risk_free_data, !rownames(risk_free_data) %in% rfd_invalid_dates)
+rates_data <- subset(rates_data, !rownames(rates_data) %in% rtsd_invalid_dates)
+
+View(rates_data)
+View(risk_free_data)
+```
+calculate market premia (premia[["SPX.Index"]]) and risk premia (premia[[equity]])
+```{r}
+premia <- rates_data
+for (date in rownames(rates_data)) {
+  r_f <- risk_free_data[date, "values"]
+  for (equity in colnames(rates_data)) {
+    premia[date, equity] <- rates_data[date, equity] - r_f
+  }
+}
+View(premia)
+```
+do linear regressions, get betas
+```{r}
+regressions <- list()
+betas <- list()
+for (equity in tail(colnames(rates_data), -1)) {
+  regressions[[equity]] <- lm( premia[[equity]] ~ premia[["SPX.Index"]] )
+  betas[[equity]] <- as.numeric(regressions[[equity]]$coef[2])
+}
+View(betas)
+```
+calculate SML
+```{r}
+avg_premium <- list()
+for (equity in colnames(rates_data)) {
+  avg_premium[[equity]] <- mean(premia[[equity]])
+}
+View(avg_premium)
+plot(betas, tail(avg_premium, -1))
+```
+done
+```{r}
+sml_regression <- lm( as.vector(unlist(tail(avg_premium, -1), use.names = FALSE)) 
+                       ~ as.vector(unlist(betas, use.names = FALSE)) )
+summary( sml_regression )
+
+```
+
+```{r}
+std_err <- summary(sml_regression)$coef[4]
+market_premium_estimate = sml_regression$coef[2]
+t_test <- (market_premium_estimate - avg_premium[["SPX.Index"]]) / std_err
+#print(t_test)
+p_val <- pt( -abs(t_test), sml_regression$df ) * 2.
+"ttest:"
+t_test
+"pval: "
+p_val
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
